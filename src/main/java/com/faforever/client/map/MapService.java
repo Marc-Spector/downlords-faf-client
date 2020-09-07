@@ -217,7 +217,7 @@ public class MapService implements InitializingBean, DisposableBean {
                         WatchService scenarioWatcher = mapPath.getFileSystem().newWatchService();
                         mapPath.register(scenarioWatcher, ENTRY_CREATE);
                         while (true) {
-                          WatchKey mapKey = scenarioWatcher.poll(1, TimeUnit.MINUTES);
+                          WatchKey mapKey = scenarioWatcher.poll(1, TimeUnit.SECONDS);
                           if (mapKey == null) {
                             scenarioWatcher.close();
                             logger.debug("No Scenario Path in Folder {}", event.context());
