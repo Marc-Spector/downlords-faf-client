@@ -208,51 +208,9 @@ public class MapService implements InitializingBean, DisposableBean {
                 if (event.kind() == ENTRY_DELETE) {
                   removeMap(mapsDirectory.resolve((Path) event.context()));
                 } else if (event.kind() == ENTRY_CREATE) {
-                  Path scenarioPath = null;
                   Path mapPath = mapsDirectory.resolve((Path) event.context());
-                  if (Files.isDirectory(mapPath)) {
-                    try {
-                      scenarioPath = Files.list(mapPath).filter(path -> path.toString().contains("scenario.lua")).findFirst().orElse(null);
-                      if (scenarioPath == null) {
-                        WatchService scenarioWatcher = mapPath.getFileSystem().newWatchService();
-                        mapPath.register(scenarioWatcher, ENTRY_CREATE);
-                        while (true) {
-                          WatchKey mapKey = scenarioWatcher.poll(1, TimeUnit.SECONDS);
-                          if (mapKey == null) {
-                            scenarioWatcher.close();
-                            logger.debug("No Scenario Path in Folder {}", event.context());
-                            return;
-                          }
-                          List<Path> mapPaths = mapKey.pollEvents().stream().filter(mapEvent -> event.kind() == ENTRY_CREATE)
-                              .filter(mapEvent -> {
-                                Path path = (Path) mapEvent.context();
-                                return path.toString().contains("scenario.lua");
-                              }).map((mapEvent) -> (Path) mapEvent.context()).collect(Collectors.toList());
-                          if (mapPaths.size() > 0) {
-                            scenarioPath = mapPath.resolve(mapPaths.get(0));
-                            break;
-                          }
-                          mapKey.reset();
-                        }
-                      }
-                      boolean fileReady = false;
-                      int tries = 0;
-                      while (!fileReady) {
-                        try {
-                          Files.readAllBytes(scenarioPath);
-                          fileReady = true;
-                        } catch (IOException e) {
-                          Thread.sleep(1000);
-                          tries += 1;
-                          if (tries > 6) {
-                            return;
-                          }
-                        }
-                      }
-                      addInstalledMap(mapPath);
-                    } catch (IOException | InterruptedException e) {
-                      logger.debug("Map Path Not Read ({})", e.getMessage());
-                    }
+                  if (Files.isDirectory(mapPath) && checkScenarioLua(mapPath)) {
+                    addInstalledMap(mapPath);
                   }
                 }
               });
@@ -265,6 +223,52 @@ public class MapService implements InitializingBean, DisposableBean {
     thread.setDaemon(true);
     thread.start();
     return thread;
+  }
+
+  private boolean checkScenarioLua(Path mapPath) {
+    try {
+      Path scenarioPath = Files.list(mapPath).filter(path -> path.toString().contains("scenario.lua")).findFirst().orElse(null);
+      if (scenarioPath == null) {
+        WatchService scenarioWatcher = mapPath.getFileSystem().newWatchService();
+        mapPath.register(scenarioWatcher, ENTRY_CREATE);
+        while (true) {
+          WatchKey mapKey = scenarioWatcher.poll(1, TimeUnit.SECONDS);
+          if (mapKey == null) {
+            scenarioWatcher.close();
+            logger.debug("No Scenario Path in Folder {}", mapPath);
+            return false;
+          }
+          List<Path> mapPaths = mapKey.pollEvents().stream().filter(mapEvent -> mapEvent.kind() == ENTRY_CREATE)
+              .filter(mapEvent -> {
+                Path path = (Path) mapEvent.context();
+                return path.toString().contains("scenario.lua");
+              }).map((mapEvent) -> (Path) mapEvent.context()).collect(Collectors.toList());
+          if (mapPaths.size() > 0) {
+            scenarioPath = mapPath.resolve(mapPaths.get(0));
+            break;
+          }
+          mapKey.reset();
+        }
+      }
+      boolean fileReady = false;
+      int tries = 0;
+      while (!fileReady) {
+        try {
+          Files.readAllBytes(scenarioPath);
+          fileReady = true;
+        } catch (IOException e) {
+          Thread.sleep(1000);
+          tries += 1;
+          if (tries > 5) {
+            return false;
+          }
+        }
+      }
+      return true;
+    } catch (IOException | InterruptedException e) {
+      logger.debug("Map Path Not Read ({})", e.getMessage());
+      return false;
+    }
   }
 
   private void loadInstalledMaps() {
