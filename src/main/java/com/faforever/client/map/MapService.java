@@ -225,6 +225,18 @@ public class MapService implements InitializingBean, DisposableBean {
     return thread;
   }
 
+  /**
+   * Returns a boolean value indicating whether a scenario.lua file is present in the given map directory
+   * <p>
+   * If the scenario file is not in the map directory initially a watcher will be created on the map directory.
+   * The watcher waits for up to 1 second for the scenario.lua file to be added to the map directory.
+   * If no scenario.lua is added to the map directory the function closes the watcher and returns false.
+   * If the scenario.lua is added to the map directory then the function will check if the file is readable and if so will return true
+   * and close the watcher. If the file is not readable the function returns false and closes the watcher.
+   *
+   * @param  mapPath  an absolute path giving the map folder location
+   * @return      boolean indicating the prescence of the scenario.lua file in mapPath
+   */
   private boolean checkScenarioLua(Path mapPath) {
     try {
       Path scenarioPath = Files.list(mapPath).filter(path -> path.toString().contains("scenario.lua")).findFirst().orElse(null);
