@@ -66,8 +66,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.faforever.client.util.LuaUtil.loadFile;
@@ -209,9 +207,12 @@ public class MapService implements InitializingBean, DisposableBean {
                   removeMap(mapsDirectory.resolve((Path) event.context()));
                 } else if (event.kind() == ENTRY_CREATE) {
                   Path mapPath = mapsDirectory.resolve((Path) event.context());
-                  if (Files.isDirectory(mapPath) && checkScenarioLua(mapPath)) {
-                    addInstalledMap(mapPath);
+                  try {
+                    Thread.sleep(1000);
+                  } catch (InterruptedException e) {
+                    logger.debug("Thread interrupted ({})", e.getMessage());
                   }
+                  addInstalledMap(mapPath);
                 }
               });
           key.reset();
@@ -223,64 +224,6 @@ public class MapService implements InitializingBean, DisposableBean {
     thread.setDaemon(true);
     thread.start();
     return thread;
-  }
-
-  /**
-   * Returns a boolean value indicating whether a scenario.lua file is present in the given map directory
-   * <p>
-   * If the scenario file is not in the map directory initially a watcher will be created on the map directory.
-   * The watcher waits for up to 1 second for the scenario.lua file to be added to the map directory.
-   * If no scenario.lua is added to the map directory the function closes the watcher and returns false.
-   * If the scenario.lua is added to the map directory then the function will check if the file is readable and if so will return true
-   * and close the watcher. If the file is not readable the function returns false and closes the watcher.
-   *
-   * @param  mapPath  an absolute path giving the map folder location
-   * @return      boolean indicating the prescence of the scenario.lua file in mapPath
-   */
-  private boolean checkScenarioLua(Path mapPath) {
-    try {
-      Path scenarioPath = Files.list(mapPath).filter(path -> path.toString().contains("scenario.lua")).findFirst().orElse(null);
-      if (scenarioPath == null) {
-        WatchService scenarioWatcher = mapPath.getFileSystem().newWatchService();
-        mapPath.register(scenarioWatcher, ENTRY_CREATE);
-        while (true) {
-          WatchKey mapKey = scenarioWatcher.poll(1, TimeUnit.SECONDS);
-          if (mapKey == null) {
-            scenarioWatcher.close();
-            logger.debug("No Scenario Path in Folder {}", mapPath);
-            return false;
-          }
-          List<Path> mapPaths = mapKey.pollEvents().stream().filter(mapEvent -> mapEvent.kind() == ENTRY_CREATE)
-              .filter(mapEvent -> {
-                Path path = (Path) mapEvent.context();
-                return path.toString().contains("scenario.lua");
-              }).map((mapEvent) -> (Path) mapEvent.context()).collect(Collectors.toList());
-          if (mapPaths.size() > 0) {
-            scenarioPath = mapPath.resolve(mapPaths.get(0));
-            break;
-          }
-          mapKey.reset();
-        }
-      }
-      boolean fileReady = false;
-      int tries = 0;
-      while (!fileReady) {
-        try {
-          Files.readAllBytes(scenarioPath);
-          fileReady = true;
-        } catch (IOException e) {
-          Thread.sleep(1000);
-          tries += 1;
-          if (tries > 5) {
-            return false;
-          }
-        }
-      }
-      return true;
-    } catch (IOException | InterruptedException e) {
-      logger.debug("Map Path Not Read ({})", e.getMessage());
-      return false;
-    }
   }
 
   private void loadInstalledMaps() {
