@@ -5,9 +5,9 @@ import com.faforever.client.chat.ChatFormat;
 import com.faforever.client.config.ClientProperties;
 import com.faforever.client.fx.Controller;
 import com.faforever.client.fx.JavaFxUtil;
-import com.faforever.client.fx.NodeListCell;
 import com.faforever.client.fx.PlatformService;
 import com.faforever.client.fx.StringListCell;
+import com.faforever.client.game.GameService;
 import com.faforever.client.i18n.I18n;
 import com.faforever.client.main.event.NavigationItem;
 import com.faforever.client.notification.Action;
@@ -64,6 +64,7 @@ import org.springframework.context.annotation.Scope;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.util.Collections;
@@ -88,6 +89,7 @@ public class SettingsController implements Controller<Node> {
   private final PlatformService platformService;
   private final ClientProperties clientProperties;
   private final ClientUpdateService clientUpdateService;
+  private final GameService gameService;
 
   public TextField executableDecoratorField;
   public TextField executionDirectoryField;
@@ -145,6 +147,8 @@ public class SettingsController implements Controller<Node> {
   public TextField channelTextField;
   public Button addChannelButton;
   public ListView<String> autoChannelListView;
+  public CheckBox allowReplayWhileInGameCheckBox;
+  public Button allowReplayWhileInGameButton;
 
   private final InvalidationListener availableLanguagesListener;
 
@@ -153,7 +157,8 @@ public class SettingsController implements Controller<Node> {
 
   public SettingsController(UserService userService, PreferencesService preferencesService, UiService uiService,
                             I18n i18n, EventBus eventBus, NotificationService notificationService,
-                            PlatformService platformService, ClientProperties clientProperties, ClientUpdateService clientUpdateService) {
+                            PlatformService platformService, ClientProperties clientProperties,
+                            ClientUpdateService clientUpdateService, GameService gameService) {
     this.userService = userService;
     this.preferencesService = preferencesService;
     this.uiService = uiService;
@@ -163,6 +168,7 @@ public class SettingsController implements Controller<Node> {
     this.platformService = platformService;
     this.clientProperties = clientProperties;
     this.clientUpdateService = clientUpdateService;
+    this.gameService = gameService;
 
     availableLanguagesListener = observable -> {
       LocalizationPrefs localization = preferencesService.getPreferences().getLocalization();
@@ -333,6 +339,19 @@ public class SettingsController implements Controller<Node> {
     String username = userService.getUsername();
     notifyAtMentionTitle.setText(i18n.get("settings.chat.notifyOnAtMentionOnly", "@" + username));
     notifyAtMentionDescription.setText(i18n.get("settings.chat.notifyOnAtMentionOnly.description", "@" + username));
+
+    initAllowReplaysWhileInGame(preferences);
+  }
+
+  private void initAllowReplaysWhileInGame(Preferences preferences) {
+    JavaFxUtil.bindBidirectional(preferences.getForgedAlliance().allowReplaysWhileInGameProperty(), allowReplayWhileInGameCheckBox.selectedProperty());
+    try {
+      gameService.isGamePrefsPatchedToAllowMultiInstances()
+          .thenAccept(isPatched -> allowReplayWhileInGameButton.setDisable(isPatched));
+    } catch (IOException e) {
+      log.warn("Failed evaluating if game.prefs file is patched for multiple instances.");
+      allowReplayWhileInGameButton.setDisable(true);
+    }
   }
 
   private void configureStartTab(Preferences preferences) {
@@ -557,6 +576,20 @@ public class SettingsController implements Controller<Node> {
     preferencesService.getPreferences().getChat().getAutoJoinChannels().add(channelTextField.getText());
     preferencesService.storeInBackground();
     channelTextField.clear();
+  }
+
+  public void onPatchGamePrefsForMultipleInstances() {
+    try {
+      gameService.patchGamePrefsForMultiInstances()
+          .thenRun(() -> Platform.runLater(() -> allowReplayWhileInGameButton.setDisable(true))).exceptionally(throwable -> {
+        log.error("Game.prefs patch failed", throwable);
+        notificationService.addImmediateErrorNotification(throwable, "settings.fa.patchGamePrefsFailed");
+        return null;
+      });
+    } catch (Exception e) {
+      log.error("Game.prefs patch failed", e);
+      notificationService.addImmediateErrorNotification(e, "settings.fa.patchGamePrefsFailed");
+    }
   }
 }
 

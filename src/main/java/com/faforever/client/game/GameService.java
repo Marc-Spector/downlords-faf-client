@@ -25,6 +25,7 @@ import com.faforever.client.notification.Severity;
 import com.faforever.client.patch.GameUpdater;
 import com.faforever.client.player.Player;
 import com.faforever.client.player.PlayerService;
+import com.faforever.client.preferences.ForgedAlliancePrefs;
 import com.faforever.client.preferences.NotificationsPrefs;
 import com.faforever.client.preferences.PreferencesService;
 import com.faforever.client.rankedmatch.MatchmakerInfoMessage;
@@ -62,12 +63,15 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -82,6 +86,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -92,6 +97,7 @@ import static com.faforever.client.fa.RatingMode.NONE;
 import static com.faforever.client.game.KnownFeaturedMod.LADDER_1V1;
 import static com.faforever.client.game.KnownFeaturedMod.TUTORIALS;
 import static com.github.nocatch.NoCatch.noCatch;
+import static java.nio.charset.StandardCharsets.US_ASCII;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.emptySet;
 import static java.util.Collections.singletonList;
@@ -111,6 +117,10 @@ public class GameService implements InitializingBean {
   private static final Pattern MAX_RATING_PATTERN = Pattern.compile("<\\s*(" + RATING_NUMBER + ")");
   private static final Pattern ABOUT_RATING_PATTERN = Pattern.compile("~\\s*(" + RATING_NUMBER + ")");
   private static final Pattern BETWEEN_RATING_PATTERN = Pattern.compile("(" + RATING_NUMBER + ")\\s*-\\s*(" + RATING_NUMBER + ")");
+  private static final Pattern GAME_PREFS_ALLOW_MULTI_LAUNCH_PATTERN = Pattern.compile("debug\\s*=(\\s)*[{][^}]*enable_debug_facilities\\s*=\\s*true");
+  private static final String GAME_PREFS_ALLOW_MULTI_LAUNCH_STRING = "\ndebug = {\n" +
+      "    enable_debug_facilities = true\n" +
+      "}";
 
   @VisibleForTesting
   final BooleanProperty gameRunning;
@@ -152,6 +162,7 @@ public class GameService implements InitializingBean {
   private Process process;
   private boolean rehostRequested;
   private int localReplayPort;
+  private ForgedAlliancePrefs forgedAlliancePrefs;
 
   @Inject
   public GameService(ClientProperties clientProperties,
@@ -198,6 +209,7 @@ public class GameService implements InitializingBean {
     games = FXCollections.observableList(new ArrayList<>(),
         item -> new Observable[]{item.statusProperty(), item.getTeams()}
     );
+    forgedAlliancePrefs = preferencesService.getPreferences().getForgedAlliance();
   }
 
   @Override
@@ -367,7 +379,7 @@ public class GameService implements InitializingBean {
    * @param path a replay file that is readable by the preferences without any further conversion
    */
   public void runWithReplay(Path path, @Nullable Integer replayId, String featuredMod, Integer version, Map<String, Integer> modVersions, Set<String> simMods, String mapName) {
-    if (isRunning()) {
+    if (isRunning() && !forgedAlliancePrefs.isAllowReplaysWhileInGame()) {
       log.warn("Forged Alliance is already running, not starting replay");
       return;
     }
@@ -383,10 +395,14 @@ public class GameService implements InitializingBean {
         .thenCompose(aVoid -> downloadMapIfNecessary(mapName).handleAsync((ignoredResult, throwable) -> askWhetherToStartWithOutMap(throwable)))
         .thenRun(() -> {
           try {
-            process = forgedAllianceService.startReplay(path, replayId);
+            Process processForReplay = forgedAllianceService.startReplay(path, replayId);
+            if (forgedAlliancePrefs.isAllowReplaysWhileInGame()) {
+              return;
+            }
+            this.process = processForReplay;
             setGameRunning(true);
             this.ratingMode = NONE;
-            spawnTerminationListener(process);
+            spawnTerminationListener(this.process);
           } catch (IOException e) {
             notifyCantPlayReplay(replayId, e);
           }
@@ -438,7 +454,7 @@ public class GameService implements InitializingBean {
   }
 
   public CompletableFuture<Void> runWithLiveReplay(URI replayUrl, Integer gameId, String gameType, String mapName) {
-    if (isRunning()) {
+    if (isRunning() && !forgedAlliancePrefs.isAllowReplaysWhileInGame()) {
       log.warn("Forged Alliance is already running, not starting live replay");
       return completedFuture(null);
     }
@@ -457,10 +473,14 @@ public class GameService implements InitializingBean {
         .thenCompose(featuredModBean -> updateGameIfNecessary(featuredModBean, null, modVersions, simModUids))
         .thenCompose(aVoid -> downloadMapIfNecessary(mapName))
         .thenRun(() -> noCatch(() -> {
-          process = forgedAllianceService.startReplay(replayUrl, gameId, getCurrentPlayer());
+          Process processCreated = forgedAllianceService.startReplay(replayUrl, gameId, getCurrentPlayer());
+          if (forgedAlliancePrefs.isAllowReplaysWhileInGame()) {
+            return;
+          }
+          this.process = processCreated;
           setGameRunning(true);
           this.ratingMode = NONE;
-          spawnTerminationListener(process);
+          spawnTerminationListener(this.process);
         }));
   }
 
@@ -900,5 +920,26 @@ public class GameService implements InitializingBean {
           return null;
         });
 
+  }
+
+  @Async
+  public CompletableFuture<Void> patchGamePrefsForMultiInstances() throws IOException, ExecutionException, InterruptedException {
+    if (isGamePrefsPatchedToAllowMultiInstances().get()) {
+      return CompletableFuture.failedFuture(new IllegalStateException("Can not patch game.prefs file cause it already is patched"));
+    }
+    Path preferencesFile = preferencesService.getPreferences().getForgedAlliance().getPreferencesFile();
+    Files.writeString(preferencesFile, GAME_PREFS_ALLOW_MULTI_LAUNCH_STRING, US_ASCII, StandardOpenOption.APPEND);
+    return CompletableFuture.completedFuture(null);
+  }
+
+  private String getGamePrefsContent() throws IOException {
+    Path preferencesFile = preferencesService.getPreferences().getForgedAlliance().getPreferencesFile();
+    return Files.readString(preferencesFile, US_ASCII);
+  }
+
+  @Async
+  public CompletableFuture<Boolean> isGamePrefsPatchedToAllowMultiInstances() throws IOException {
+    String gamePrefsContent = getGamePrefsContent();
+    return CompletableFuture.completedFuture(GAME_PREFS_ALLOW_MULTI_LAUNCH_PATTERN.matcher(gamePrefsContent).find());
   }
 }

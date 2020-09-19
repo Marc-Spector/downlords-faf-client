@@ -50,6 +50,7 @@ public class ForgedAlliancePrefs {
   private final ObjectProperty<Path> modsDirectory;
   private final BooleanProperty forceRelay;
   private final BooleanProperty autoDownloadMaps;
+  private final BooleanProperty allowReplaysWhileInGame;
   /**
    * Saves if the client checked for special cases in which it needs to set the fallback vault location. See {@link
    * com.faforever.client.vault.VaultFileSystemLocationChecker}
@@ -84,6 +85,7 @@ public class ForgedAlliancePrefs {
     executionDirectory = new SimpleObjectProperty<>();
     vaultCheckDone = new SimpleBooleanProperty(false);
     bindVaultPath();
+    allowReplaysWhileInGame = new SimpleBooleanProperty(false);
   }
 
   /**
@@ -235,5 +237,17 @@ public class ForgedAlliancePrefs {
 
   public BooleanProperty vaultCheckDoneProperty() {
     return vaultCheckDone;
+  }
+
+  public boolean isAllowReplaysWhileInGame() {
+    return allowReplaysWhileInGame.get();
+  }
+
+  public void setAllowReplaysWhileInGame(boolean allowReplaysWhileInGame) {
+    this.allowReplaysWhileInGame.set(allowReplaysWhileInGame);
+  }
+
+  public BooleanProperty allowReplaysWhileInGameProperty() {
+    return allowReplaysWhileInGame;
   }
 }

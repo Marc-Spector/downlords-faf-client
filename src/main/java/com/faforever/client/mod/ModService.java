@@ -96,9 +96,9 @@ public class ModService implements InitializingBean, DisposableBean {
   private final ModReader modReader = new ModReader();
 
   private Path modsDirectory;
-  private Map<Path, ModVersion> pathToMod = new HashMap<>();
-  private ObservableList<ModVersion> installedModVersions = FXCollections.observableArrayList();
-  private ObservableList<ModVersion> readOnlyInstalledModVersions = FXCollections.unmodifiableObservableList(installedModVersions);
+  private final Map<Path, ModVersion> pathToMod = new HashMap<>();
+  private final ObservableList<ModVersion> installedModVersions = FXCollections.observableArrayList();
+  private final ObservableList<ModVersion> readOnlyInstalledModVersions = FXCollections.unmodifiableObservableList(installedModVersions);
   private Thread directoryWatcherThread;
 
   @Override
@@ -351,7 +351,7 @@ public class ModService implements InitializingBean, DisposableBean {
     Path preferencesFile = preferencesService.getPreferences().getForgedAlliance().getPreferencesFile();
     Map<String, Boolean> mods = new HashMap<>();
 
-    String preferencesContent = new String(Files.readAllBytes(preferencesFile), US_ASCII);
+    String preferencesContent = Files.readString(preferencesFile, US_ASCII);
     Matcher matcher = ACTIVE_MODS_PATTERN.matcher(preferencesContent);
     if (matcher.find()) {
       Matcher activeModMatcher = ACTIVE_MOD_PATTERN.matcher(matcher.group(0));
