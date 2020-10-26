@@ -275,7 +275,6 @@ dependencies {
   compile("commons-validator:commons-validator:1.6")
   compile("com.github.micheljung:JJsonRpc:01a7fba5f4")
   compile("javax.inject:javax.inject:1")
-  compile("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${jacksonDatatypeJsr310Version}")
   compile("com.github.rutledgepaulv:q-builders:${qBuildersVersion}")
   compile("com.github.nsp:JSkills:${jSkillsVersion}")
   compile("com.github.jasminb:jsonapi-converter:${jsonapiConverterVersion}")
